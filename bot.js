@@ -41,7 +41,7 @@ client.on('messageCreate', (message) => __awaiter(void 0, void 0, void 0, functi
     if (message.author.bot)
         return;
     // Check if the bot is mentioned in the message
-    if (client.user && message.mentions.has(client.user.id)) {
+    if (client.user && message.mentions.has(client.user.id) && message.content.startsWith(`<@${client.user.id}>`)) {
         // Rate limit the queries
         // const userId = message.author.id;
         // const serverId = message.guild?.id;
