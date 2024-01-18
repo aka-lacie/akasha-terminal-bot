@@ -19,7 +19,7 @@ const openai = new openai_1.OpenAI();
 const supabase_url = process.env["AKASHA_SUPABASE_URL"] || '';
 const supabase_key = process.env["AKASHA_SUPABASE_KEY"] || '';
 const supabaseClient = (0, supabase_js_1.createClient)(supabase_url, supabase_key);
-const systemPrompt = "You are the Akasha Terminal, a smart answer engine able to access the collective knowledge of Teyvat stored in the Irminsul database. Use the enumerated data provided to answer the given question, and cite sources referenced in your answer with brackets in the format `[id]`. Each piece of provided data may or may not be relevant to the question – discern using your best judgement and refuse questions outside of the scope of your data pertaining to Genshin Impact. If you cannot determine any answer, say so. Keep it concise - every word counts.";
+const systemPrompt = "You are the Akasha Terminal, a smart answer engine able to access the collective knowledge of Teyvat. Use the enumerated data provided to answer the given user question, and cite sources referenced in your answer with brackets in the format `[id]`. Each piece of provided data may or may not be relevant to the question – discern using your best judgement and refuse questions outside of the scope of your data pertaining to Genshin Impact. If you cannot determine any answer, say so, but you MUST NOT make any direct mention of a dataset - allude instead to your own knowledge - also consider if the user has made a typo of a name. Keep it concise - every word counts.";
 // ============================================================
 // SEARCH
 // ============================================================
@@ -141,10 +141,14 @@ const sanitizeText = (text) => {
  * @returns An array of one or more titles
  */
 const getTitlesFromText = (text) => {
-    const lines = text.split('\n', 3).map(line => line.trim());
+    let lines = text.split('\n', 4).map(line => line.trim());
+    lines = lines.filter(line => line);
     let titles = [lines[0]];
-    for (let line in lines) {
-        if (line && line.startsWith('==')) {
+    if (lines.length < 2)
+        return titles;
+    for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.startsWith('==')) {
             titles.push(line.replace(/=/g, '').trim());
         }
         else {
@@ -159,15 +163,17 @@ const getURLFromTitles = (titles) => {
     const sectiontitle = titles.length > 1 ? titles[1].replace(/ /g, '_') : '';
     return `${prefix}${pagetitle}#${sectiontitle}`;
 };
-// const logQA = async (query: string, response: string) => {
-//   await supabaseClient.from('query_logs').insert([
-//     { user_query: query, llm_answer: response }
-//   ])
-// }
+const logQA = (query, response) => __awaiter(void 0, void 0, void 0, function* () {
+    yield supabaseClient.from('query_logs').insert([
+        { user_query: query, llm_answer: response }
+    ]);
+});
 const query = (question) => __awaiter(void 0, void 0, void 0, function* () {
     const sanitizedQuestion = sanitizeText(question);
     const searchData = yield getRelatedTextFromSupabase(sanitizedQuestion);
     let response = yield ask(sanitizedQuestion, searchData);
+    // Replace double brackets with single brackets just in case
+    response = response.replace(/\[\[/g, '[').replace(/\]\]/g, ']');
     const citations = response.match(/\[\d+\]/g) || [];
     const citationIds = citations.map(citation => parseInt(citation.replace(/\[|\]/g, '')));
     const citationMap = new Map();
@@ -175,20 +181,22 @@ const query = (question) => __awaiter(void 0, void 0, void 0, function* () {
         if (id > searchData.length)
             continue;
         const url = getURLFromTitles(getTitlesFromText(searchData[id - 1][0]));
-        if (!Array.from(citationMap.values()).some(value => value === url)) {
-            citationMap.set(`[${id}]`, url);
-        }
-        else {
-            response = response.replace(`[${id}]`, '');
-        }
+        citationMap.set(`[${id}]`, url);
     }
-    let index = 1;
     for (let [citation, url] of citationMap) {
-        const markupLink = `[[${index}]](${url})`;
+        const markupLink = `[${citation}](${url})`;
         response = response.replace(citation, markupLink);
-        index++;
     }
-    // await logQA(query, response)
+    // Remove any citations that were not replaced, eg [id] not followed by (url)
+    // response = response.replace(/\[\d+\]/g, '');
+    // Remove redundant citations that lead to the same url as a previous citation
+    const citationsToRemove = new Set();
+    for (let citation of citationMap.keys()) {
+        if (response.includes(citation)) {
+            citationsToRemove.add(citation);
+        }
+    }
+    process.nextTick(logQA, sanitizedQuestion, response);
     return response;
 });
 exports.default = query;

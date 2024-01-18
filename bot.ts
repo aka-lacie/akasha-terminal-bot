@@ -32,7 +32,7 @@ client.on('messageCreate', async (message: Message) => {
     if (message.author.bot) return;
 
     // Check if the bot is mentioned in the message
-    if (client.user && message.mentions.has(client.user.id)) {
+    if (client.user && message.mentions.has(client.user.id) && message.content.startsWith(`<@${client.user.id}>`)) {
 
         // Rate limit the queries
         // const userId = message.author.id;
